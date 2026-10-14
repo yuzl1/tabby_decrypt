@@ -11,11 +11,23 @@
 ## 快速开始
 
 ```bash
+# 创建虚拟环境
+python3 -m venv venv
+# 激活虚拟环境
+source venv/bin/activate
+
 # 安装依赖
 pip install -r requirements.txt
 
 # 运行解密器
 python tabby_decrypt.py
+
+# 退出虚拟环境（回到系统全局Python）
+deactivate
+
+# 删除虚拟环境（想重建环境时）
+rm -rf venv
+
 ```
 
 ---
