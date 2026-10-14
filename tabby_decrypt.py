@@ -6,6 +6,8 @@ Tabby 密码解密器 - 一体化版本
 用法: python tabby_decrypt.py [config.yaml路径] [Vault密码短语]
 """
 
+import subprocess
+
 import os
 import sys
 import base64
@@ -44,15 +46,20 @@ CRYPT_IV_LENGTH = 16   # 128 bits
 # Vault 加密/解密功能
 # ============================================================
 
+# 注释原来的 from Crypto.Protocol.KDF import PBKDF2
+# 新增依赖：cryptography
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+
 def derive_vault_key(passphrase: str, salt: bytes) -> bytes:
-    """使用PBKDF2派生密钥"""
-    return PBKDF2(
-        passphrase,
-        salt,
-        dkLen=CRYPT_KEY_LENGTH,
-        count=PBKDF_ITERATIONS,
-        hmac_hash_module=hashlib.sha512
+    """使用PBKDF2派生密钥，对齐Tabby原版实现"""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA512(),
+        length=CRYPT_KEY_LENGTH,
+        salt=salt,
+        iterations=PBKDF_ITERATIONS,
     )
+    return kdf.derive(passphrase.encode("utf-8"))
 
 
 def decrypt_vault(vault_data: dict, passphrase: str) -> dict:
@@ -172,19 +179,55 @@ def read_windows_credentials() -> list:
 def read_macos_keychain() -> list:
     """读取macOS钥匙串中的Tabby密码"""
     passwords = []
-
     try:
-        # 使用security命令查找所有generic密码
+        # 列出所有 generic-password，查找包含tabby的条目
         result = subprocess.run(
-            ['security', 'find-generic-password', '-s', 'ssh@', '-g', '2>&1'],
+            ['security', 'find-generic-password', '-g', '-a', '', '-s', '',  '2>&1'],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=15
         )
+        raw = result.stderr + result.stdout
+        entries = raw.split("keychain:")
+        for entry in entries:
+            if "tabby" not in entry.lower():
+                continue
+            account = None
+            service = None
+            secret = None
+            for line in entry.splitlines():
+                line = line.strip()
+                if line.startswith('"acct"<blob>="'):
+                    account = line.split('"acct"<blob>="')[1].rstrip('"')
+                elif line.startswith('"svce"<blob>="'):
+                    service = line.split('"svce"<blob>="')[1].rstrip('"')
+                elif line.startswith("password: "):
+                    # password: "xxxx"
+                    pwd_line = line.replace("password: ", "").strip()
+                    if pwd_line.startswith('"'):
+                        secret = pwd_line.strip('"')
+            if secret and service:
+                if service.startswith("ssh@"):
+                    passwords.append({
+                        'source': 'keytar',
+                        'type': 'SSH密码',
+                        'target': service,
+                        'host': service,
+                        'port':22,
+                        'username': account,
+                        'password': secret
+                    })
+                elif service.startswith("ssh-private-key:"):
+                    passwords.append({
+                        'source': 'keytar',
+                        'type': 'SSH私钥密码',
+                        'key_id': service.replace('ssh-private-key:', ''),
+                        'password': secret
+                    })
     except Exception as e:
         print(f"[!] 读取macOS钥匙串失败: {e}")
-
     return passwords
+
 
 
 def read_linux_secret_tool() -> list:
