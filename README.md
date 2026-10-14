@@ -20,7 +20,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 运行解密器
-python tabby_decrypt.py
+python3 tabby_decrypt.py
 
 # 退出虚拟环境（回到系统全局Python）
 deactivate
